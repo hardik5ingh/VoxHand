@@ -1,4 +1,5 @@
-const API_BASE = "http://127.0.0.1:5000"; 
+// const API_BASE = "http://127.0.0.1:5000"; 
+const API_BASE = "https://voxhand-backend.onrender.com";
 let GOOGLE_CLIENT_ID = "";
 const video = document.getElementById("webcam");
 const canvas = document.getElementById("hiddenCanvas");
