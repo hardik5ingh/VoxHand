@@ -1,0 +1,12 @@
+flask
+flask-cors
+gunicorn
+python-dotenv
+google-auth
+mediapipe
+opencv-contrib-python
+scikit-learn
+joblib
+numpy
+wordfreq
+requests

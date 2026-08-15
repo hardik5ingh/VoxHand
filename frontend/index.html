@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VoxHand AI - Sign Translator</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="shortcut icon" href="images/logo.svg" type="image/x-icon">
+  <!-- Google Identity Services SDK -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header>
+      <div class="brand">
+        <div class="logo-icon">
+          <img src="images/logo.svg" alt="VoxHand AI Logo" class="brand-logo-img" />
+        </div>
+        <div>
+          <h1>VoxHand AI</h1>
+          <span>Sign Language to Speech Translator</span>
+        </div>
+      </div>
+
+      <!-- Right Header Actions -->
+      <div class="header-actions">
+        <!-- Toast Notification (Floats to the left of the Avatar) -->
+        <div id="authPromptToast" class="auth-prompt-toast">
+          <span>Sign in</span>
+        </div>
+
+        <!-- User Avatar & Status Badge -->
+        <div id="authContainer" class="auth-container">
+          <div id="userProfile" class="user-profile-container logged-out" onclick="toggleProfileMenu(event)">
+            
+            <div class="avatar-wrapper">
+              <img id="userAvatar" class="user-avatar" src="" alt="Profile" style="display: none;" />
+              <div id="defaultAvatarIcon" class="default-avatar-icon">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                </svg>
+              </div>
+              <span id="statusDot" class="status-dot-badge offline" title="AI Status"></span>
+            </div>
+            
+            <!-- Hover Tooltip -->
+            <div class="profile-tooltip">
+              <div class="dropdown-arrow"></div>
+              <span id="tooltipTitle" class="profile-name">Sign In</span>
+              <span id="tooltipSubtitle" class="profile-email">Click to connect Google</span>
+              <span id="statusText" class="tooltip-status-text offline">● Connecting to AI Translator...</span>
+            </div>
+
+            <!-- Dropdown Menu -->
+            <div id="profileDropdownMenu" class="profile-menu">
+              <div id="loginSection" class="menu-auth-section">
+                <p id="menuPromptText" class="menu-prompt-text">Sign in to sync your profile</p>
+                <div id="googleBtnWrapper"></div>
+              </div>
+
+              <div id="logoutSection" class="menu-auth-section" style="display: none;">
+                <button class="profile-menu-item logout" onclick="handleSignOut(event)">
+                  Sign Out
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Grid -->
+    <div class="main-grid">
+      <!-- Vision Canvas Card -->
+      <section class="card">
+        <div class="card-title">
+          <div class="title-with-select">
+            <span>📹 Vision Canvas</span>
+            <select id="cameraSelect" class="camera-select" title="Select Video Input Device">
+              <option value="">Detecting cameras...</option>
+            </select>
+          </div>
+          <span id="camStatusIndicator" class="cam-indicator off">● CAMERA OFF</span>
+        </div>
+
+        <div class="video-viewport">
+          <video id="webcam" autoplay playsinline muted></video>
+          <canvas id="hiddenCanvas"></canvas>
+          
+          <div id="cameraPlaceholder" class="camera-placeholder">
+            <span class="placeholder-icon">📷</span>
+            <p>Camera is currently turned off</p>
+          </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="camera-controls">
+          <button id="toggleCamBtn" class="toggle-cam-btn turn-on" onclick="toggleCamera()">
+            ▶ Start Camera
+          </button>
+
+          <div class="right-controls">
+            <!-- Sign Guide Button -->
+            <button class="guide-trigger-btn" onclick="openGuideModal()" title="View Sign Language Chart">
+              📖 Sign Guide
+            </button>
+
+            <div class="mode-bar">
+              <button class="mode-btn active" onclick="setMode('1')">Letters (A-Z)</button>
+              <button class="mode-btn" onclick="setMode('2')">Numbers (0-10)</button>
+              <button class="mode-btn" onclick="setMode('0')">All</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Output / Results Card -->
+      <section class="card">
+        <div class="detected-box">
+          <span class="section-label">Current Detected Sign</span>
+          <div id="gestureValue" class="gesture-text">--</div>
+        </div>
+
+        <div class="suggestions-box">
+          <span class="section-label">Smart Suggestions</span>
+          <div id="chipsContainer" class="chips-wrapper">
+            <span class="no-sugg">Type signs to see suggestions...</span>
+          </div>
+        </div>
+
+        <div class="transcript-box">
+          <div class="transcript-header">
+            <span class="section-label">Constructed Sentence</span>
+            <div class="icon-actions">
+              <button class="small-btn" onclick="copyText()">📋 Copy</button>
+              <button class="small-btn danger" onclick="clearText()">🗑️ Clear</button>
+            </div>
+          </div>
+          <div class="sentence-display">
+            <span id="sentenceText"></span>
+            <span id="currentWord" class="active-word"></span>
+            <span class="cursor">|</span>
+          </div>
+        </div>
+
+        <button class="speak-btn" onclick="speakText()">
+          🔊 Speak Sentence
+        </button>
+      </section>
+    </div>
+
+    <!-- ==========================================
+         FOOTER SECTION
+         ========================================== -->
+    <footer class="app-footer">
+      <div class="footer-left">
+        <p class="copyright-text">
+          © 2026 <strong>VoxHand AI</strong> • Created by 
+          <a href="https://hardik5ingh.netlify.app/" target="_blank" rel="noopener noreferrer" class="creator-link">
+            <span class="creator-name">Hardik Singh</span>
+          </a>
+        </p>
+        <span class="footer-subtext">Real-time Computer Vision & Sign-to-Speech Engine</span>
+      </div>
+
+      <div class="footer-right">
+        <!-- Email -->
+        <a href="mailto:hardiksingh0807@gmail.com" class="footer-social-btn" title="Email Contact">
+          <svg class="social-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+          </svg>
+        </a>
+
+        <!-- GitHub -->
+        <a href="https://github.com/hardik5ingh" target="_blank" rel="noopener noreferrer" class="footer-social-btn" title="GitHub">
+          <svg class="social-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+          </svg>
+        </a>
+
+        <!-- LinkedIn -->
+        <a href="https://linkedin.com/in/hardik5ingh" target="_blank" rel="noopener noreferrer" class="footer-social-btn" title="LinkedIn">
+          <svg class="social-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.46 8.76c.96 0 1.74-.78 1.74-1.75a1.75 1.75 0 0 0-3.49 0c0 .97.78 1.75 1.75 1.75m1.39 9.74v-8.37H5.07v8.37h2.78z"/>
+          </svg>
+        </a>
+
+        <!-- X (Twitter) -->
+        <a href="https://x.com/hardik5ingh" target="_blank" rel="noopener noreferrer" class="footer-social-btn" title="X (Twitter)">
+          <svg class="social-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+          </svg>
+        </a>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ==========================================
+       GESTURE GUIDE MODAL POPUP
+       ========================================== -->
+  <div id="guideModal" class="guide-modal-overlay" onclick="closeGuideModalOnOutsideClick(event)">
+    <div class="guide-modal-content">
+      <div class="guide-modal-header">
+        <div class="guide-title">
+          <h2>🤟 Gesture Guide & Cheat Sheet</h2>
+          <span>Learn and reference ASL signs supported by VoxHand AI</span>
+        </div>
+        <button class="guide-close-btn" onclick="closeGuideModal()" title="Close">&times;</button>
+      </div>
+
+      <!-- Tab Navigation -->
+      <div class="guide-tab-bar">
+        <button id="tabAlphabets" class="guide-tab-btn active" onclick="switchGuideTab('alphabets')">🔤 Alphabets (A–Z)</button>
+        <button id="tabNumbers" class="guide-tab-btn" onclick="switchGuideTab('numbers')">🔢 Numbers (0–10)</button>
+        <button id="tabSpecial" class="guide-tab-btn" onclick="switchGuideTab('special')">⚡ Special Controls</button>
+      </div>
+
+      <!-- Tab Panels -->
+      <div class="guide-image-container">
+        <!-- 1. Alphabets Panel -->
+        <div id="guideAlphabets" class="guide-tab-panel active">
+          <img src="images/signLanguageGestures(A-Z).jpg" alt="Alphabet Sign Language Chart (A to Z)" class="guide-image" />
+        </div>
+
+        <!-- 2. Numbers Panel -->
+        <div id="guideNumbers" class="guide-tab-panel">
+          <div class="placeholder-guide-box">
+            <span class="placeholder-guide-icon">🔢</span>
+            <h3>Numbers (0 to 10)</h3>
+            <p>Numeric hand sign chart will appear here once added to your images folder.</p>
+            <div class="number-hints-grid">
+              <div class="hint-card"><strong>0–5:</strong> Standard finger counts</div>
+              <div class="hint-card"><strong>6–9:</strong> Thumb touches fingers (Pinky=6, Ring=7, Middle=8, Index=9)</div>
+              <div class="hint-card"><strong>10:</strong> Thumbs-up shaking gesture</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Special / Controls Panel -->
+        <div id="guideSpecial" class="guide-tab-panel">
+          <div class="special-legend">
+            <div class="legend-card">
+              <span class="legend-icon">␣</span>
+              <strong>Space Sign</strong>
+              <p>Confirms and locks the active word into the transcript sentence.</p>
+            </div>
+            <div class="legend-card">
+              <span class="legend-icon">⌫</span>
+              <strong>Delete (Del) Sign</strong>
+              <p>Backspaces and removes the last detected letter or digit.</p>
+            </div>
+            <div class="legend-card">
+              <span class="legend-icon">🔊</span>
+              <strong>Full Stop (.) Sign</strong>
+              <p>Ends the sentence with a period and automatically triggers voice synthesis readout.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
