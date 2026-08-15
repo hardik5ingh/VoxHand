@@ -489,15 +489,19 @@ function stopCamera() {
 // ==========================================
 // FRAME TRANSMISSION LOOP
 // ==========================================
+let isProcessingFrame = false;
+
 async function sendFrame() {
   if (!isCameraRunning) return;
 
-  if (video.readyState === video.HAVE_ENOUGH_DATA) {
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+  if (!isProcessingFrame && video.readyState === video.HAVE_ENOUGH_DATA) {
+    isProcessingFrame = true;
+
+    canvas.width = 320;
+    canvas.height = 240;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    const base64Image = canvas.toDataURL("image/jpeg", 0.6);
+    const base64Image = canvas.toDataURL("image/jpeg", 0.4);
 
     try {
       const response = await fetch(`${API_BASE}/process_frame`, {
@@ -510,17 +514,16 @@ async function sendFrame() {
         const data = await response.json();
         updateUI(data);
         setServerStatus(true);
-      } else {
-        setServerStatus(false);
       }
     } catch (err) {
       setServerStatus(false);
+    } finally {
+      isProcessingFrame = false;
     }
   }
 
-  loopTimeout = setTimeout(sendFrame, 50);
+  loopTimeout = setTimeout(sendFrame, 80);
 }
-
 function updateUI(data) {
   if (data.action === "confirm") {
     playFeedbackSound("confirm");

@@ -29,8 +29,8 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 CONFIG = {
     "MODEL_PATH": os.path.join(os.path.dirname(__file__), "models", "hand_landmarker.task"),
     "GESTURE_MODEL_PATH": os.path.join(os.path.dirname(__file__), "models", "gesture_model.pkl"),
-    "CONFIRMATION_FRAMES": 5,
-    "CONFIDENCE_THRESHOLD": 0.40,
+    "CONFIRMATION_FRAMES": 2,      # Tuned for fast, responsive typing
+    "CONFIDENCE_THRESHOLD": 0.35,  # Low-latency probability threshold
 }
 
 DICTIONARY = [w.upper() for w in top_n_list('en', 25000) if w.isalpha()]
@@ -163,8 +163,116 @@ def google_auth():
     except ValueError as e:
         return jsonify({'error': 'Invalid Google token', 'details': str(e)}), 401
 
+@app.route('/predict_landmarks', methods=['POST'])
+def predict_landmarks():
+    """High-speed coordinate prediction route."""
+    global last_appended_gesture, current_candidate, candidate_counter
+    
+    data = request.get_json() or {}
+    landmarks_data = data.get('landmarks')
+    img_w = data.get('width', 640)
+    img_h = data.get('height', 480)
+
+    if not landmarks_data:
+        with state_lock:
+            last_appended_gesture = None
+            current_candidate = None
+            candidate_counter = 0
+            current_state["detected_gesture"] = "None"
+            current_state["confidence"] = 0.0
+            current_state["hand_detected"] = False
+        return jsonify(current_state)
+
+    class DummyLandmark:
+        def __init__(self, pt):
+            self.x = pt['x']
+            self.y = pt['y']
+            self.z = pt['z']
+
+    landmarks = [DummyLandmark(pt) for pt in landmarks_data]
+    features = extract_features(landmarks, img_w, img_h)
+    
+    detected_pred = "None"
+    max_prob = 0.0
+    action_triggered = "none"
+
+    with state_lock:
+        mode_name, allowed_classes = MODES.get(current_state["mode"], MODES['1'])
+        probabilities = clf.predict_proba(features)[0]
+        valid_indices = [i for i, c in enumerate(clf.classes_) if c in allowed_classes]
+
+        if valid_indices:
+            filtered_probs = probabilities[valid_indices]
+            filtered_classes = clf.classes_[valid_indices]
+
+            max_prob = float(np.max(filtered_probs))
+            detected_pred = str(filtered_classes[np.argmax(filtered_probs)]).lower()
+
+            if max_prob >= CONFIG["CONFIDENCE_THRESHOLD"]:
+                if detected_pred == current_candidate:
+                    candidate_counter += 1
+                else:
+                    current_candidate = detected_pred
+                    candidate_counter = 1
+
+                if candidate_counter >= CONFIG["CONFIRMATION_FRAMES"]:
+                    if detected_pred != last_appended_gesture:
+                        last_appended_gesture = detected_pred
+
+                        if detected_pred == 'del':
+                            action_triggered = "delete"
+                            if len(current_state["current_word"]) > 0:
+                                if current_state["current_word"].endswith('10'):
+                                    current_state["current_word"] = current_state["current_word"][:-2]
+                                else:
+                                    current_state["current_word"] = current_state["current_word"][:-1]
+                            elif len(current_state["sentence"]) > 0:
+                                current_state["sentence"] = current_state["sentence"][:-1]
+
+                        elif detected_pred == 'space':
+                            action_triggered = "confirm"
+                            if current_state["current_word"]:
+                                current_state["sentence"] += current_state["current_word"] + " "
+                                current_state["current_word"] = ""
+
+                        elif detected_pred == '.':
+                            action_triggered = "speak"
+                            if current_state["current_word"]:
+                                current_state["sentence"] += current_state["current_word"] + ". "
+                                current_state["current_word"] = ""
+                            elif current_state["sentence"] and not current_state["sentence"].endswith('. '):
+                                current_state["sentence"] = current_state["sentence"].strip() + ". "
+
+                        elif detected_pred in numbers_set:
+                            action_triggered = "confirm"
+                            current_state["current_word"] += detected_pred.upper()
+
+                        else:
+                            action_triggered = "confirm"
+                            current_state["current_word"] += detected_pred.upper()
+
+                        current_state["suggestions"] = get_word_suggestions(current_state["current_word"])
+            else:
+                candidate_counter = 0
+
+        current_state["detected_gesture"] = detected_pred.upper()
+        current_state["confidence"] = round(max_prob * 100, 1)
+        current_state["hand_detected"] = True
+
+        return jsonify({
+            "gesture": current_state["detected_gesture"],
+            "confidence": current_state["confidence"],
+            "current_word": current_state["current_word"],
+            "sentence": current_state["sentence"],
+            "suggestions": current_state["suggestions"],
+            "mode_key": current_state["mode"],
+            "hand_detected": True,
+            "action": action_triggered
+        })
+
 @app.route('/process_frame', methods=['POST'])
 def process_frame():
+    """Fallback Base64 frame processing route."""
     global last_appended_gesture, current_candidate, candidate_counter
 
     data = request.get_json()
@@ -209,12 +317,12 @@ def process_frame():
                     max_prob = float(np.max(filtered_probs))
                     detected_pred = str(filtered_classes[np.argmax(filtered_probs)]).lower()
 
-                    if max_prob > CONFIG["CONFIDENCE_THRESHOLD"]:
+                    if max_prob >= CONFIG["CONFIDENCE_THRESHOLD"]:
                         if detected_pred == current_candidate:
                             candidate_counter += 1
                         else:
                             current_candidate = detected_pred
-                            candidate_counter = 0
+                            candidate_counter = 1
 
                         if candidate_counter >= CONFIG["CONFIRMATION_FRAMES"]:
                             if detected_pred != last_appended_gesture:
@@ -320,5 +428,6 @@ def clear():
     return jsonify({"status": "success"})
 
 if __name__ == '__main__':
-    print("🚀 VoxHand Flask API running at http://127.0.0.1:5000")
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    port = int(os.getenv("PORT", 5000))
+    print(f"🚀 VoxHand Flask API running at http://127.0.0.1:{port}")
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
