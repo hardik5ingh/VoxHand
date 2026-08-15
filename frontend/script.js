@@ -130,11 +130,11 @@ async function initAuthSystem() {
     }
   }
 
-  // 2. Poll only after fetch completes or if ID exists
+  // 2. Poll for Google SDK and render immediately on first load
   if (GOOGLE_CLIENT_ID) {
     waitForGoogleSdkAndRender();
   } else {
-    // Retry fetching config if server was slow
+    // Retry fetching config if backend is spinning up
     const retryInterval = setInterval(async () => {
       try {
         const res = await fetch(`${API_BASE}/api/config`);
@@ -147,24 +147,21 @@ async function initAuthSystem() {
           }
         }
       } catch (e) {
-        // Keep retrying
+        // Keep retrying until server responds
       }
     }, 1000);
   }
 }
 
 function waitForGoogleSdkAndRender() {
-  let retries = 0;
-  const timer = setInterval(() => {
-    retries++;
+  const checkSdk = () => {
     if (window.google && window.google.accounts && window.google.accounts.id && GOOGLE_CLIENT_ID) {
-      clearInterval(timer);
       renderGoogleButton();
-    } else if (retries > 100) {
-      clearInterval(timer);
-      console.error("Google SDK timed out.");
+    } else {
+      setTimeout(checkSdk, 100);
     }
-  }, 100);
+  };
+  checkSdk();
 }
 
 function renderGoogleButton() {
