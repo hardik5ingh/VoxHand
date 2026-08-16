@@ -348,6 +348,14 @@ header {
   transition: color 0.3s ease;
 }
 
+#googleBtnWrapper {
+  min-height: 40px;
+  min-width: 180px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
 .profile-menu-item {
   width: 100%;
   display: flex;
@@ -875,7 +883,7 @@ header {
 }
 
 /* ==========================================
-   GESTURE GUIDE MODAL POPUP
+   GESTURE GUIDE & TRIAL MODAL POPUP
    ========================================== */
 .guide-modal-overlay {
   position: fixed;
@@ -914,6 +922,68 @@ header {
 
 .guide-modal-overlay.active .guide-modal-content {
   transform: scale(1);
+}
+
+/* Trial Expired Specific Modal Box */
+.trial-modal-box {
+  max-width: 440px;
+  text-align: center;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+}
+
+.modal-close-cross-btn {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 8px;
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.modal-close-cross-btn:hover {
+  color: var(--danger);
+  transform: scale(1.15);
+}
+
+.trial-icon {
+  /* font-size: 3rem; */
+  /* margin-bottom: 2px; */
+  img{
+    height: 40px;
+    width: 40px;
+  }
+}
+
+.trial-modal-box h2 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.trial-modal-box p {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+
+.modal-login-btn-container {
+  min-height: 44px;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .guide-modal-header {

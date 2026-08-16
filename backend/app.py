@@ -1,23 +1,24 @@
 import base64
+from datetime import datetime
+import difflib
 import os
 import sys
 import threading
 import time
+
 import cv2
-import joblib
-import numpy as np
+from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from wordfreq import top_n_list
-import difflib
-from dotenv import load_dotenv
-
-from google.oauth2 import id_token
+from flask_sqlalchemy import SQLAlchemy
 from google.auth.transport import requests as google_requests
-
+from google.oauth2 import id_token
+import joblib
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+import numpy as np
+from wordfreq import top_n_list
 
 # Load environment variables
 load_dotenv()
@@ -47,11 +48,41 @@ def get_word_suggestions(prefix, top_k=4):
     return combined[:top_k]
 
 # ==========================================
-# FLASK INITIALIZATION
+# FLASK & DATABASE INITIALIZATION
 # ==========================================
 app = Flask(__name__)
 CORS(app)
 
+# Database Connection (Uses Render PostgreSQL or local SQLite fallback)
+database_url = os.getenv("DATABASE_URL", "sqlite:///users.db")
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+
+app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+db = SQLAlchemy(app)
+
+# ==========================================
+# DATABASE MODEL
+# ==========================================
+class User(db.Model):
+    __tablename__ = "users"
+
+    id = db.Column(db.Integer, primary_key=True)
+    google_id = db.Column(db.String(100), unique=True, nullable=False)
+    name = db.Column(db.String(150), nullable=True)
+    email = db.Column(db.String(150), unique=True, nullable=False)
+    picture = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_login = db.Column(db.DateTime, default=datetime.utcnow)
+
+with app.app_context():
+    db.create_all()
+
+# ==========================================
+# MEDIAPIPE & MODEL LOADING
+# ==========================================
 if not os.path.exists(CONFIG["GESTURE_MODEL_PATH"]) or not os.path.exists(CONFIG["MODEL_PATH"]):
     raise FileNotFoundError("Error: Missing model files in models/ folder.")
 
@@ -134,7 +165,7 @@ def extract_features(landmarks, img_w, img_h):
     return np.hstack((raw_features, extra_features)).reshape(1, -1)
 
 # ==========================================
-# API ROUTES
+# AUTH & USER ROUTES
 # ==========================================
 @app.route('/api/config', methods=['GET'])
 def get_config():
@@ -151,18 +182,64 @@ def google_auth():
 
     try:
         idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), GOOGLE_CLIENT_ID)
+        
+        google_id = idinfo.get("sub")
+        email = idinfo.get("email")
+        name = idinfo.get("name", "User")
+        picture = idinfo.get("picture", "")
+
+        # Persist user in PostgreSQL
+        user = User.query.filter_by(google_id=google_id).first()
+        if user:
+            user.name = name
+            user.picture = picture
+            user.last_login = datetime.utcnow()
+        else:
+            user = User(
+                google_id=google_id,
+                email=email,
+                name=name,
+                picture=picture,
+                created_at=datetime.utcnow(),
+                last_login=datetime.utcnow()
+            )
+            db.session.add(user)
+
+        db.session.commit()
+
         return jsonify({
             'status': 'success',
             'user': {
-                'id': idinfo['sub'],
-                'email': idinfo.get('email'),
-                'name': idinfo.get('name'),
-                'picture': idinfo.get('picture')
+                'id': user.id,
+                'google_id': user.google_id,
+                'email': user.email,
+                'name': user.name,
+                'picture': user.picture
             }
-        })
+        }), 200
+
     except ValueError as e:
         return jsonify({'error': 'Invalid Google token', 'details': str(e)}), 401
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Database error', 'details': str(e)}), 500
 
+@app.route('/api/users', methods=['GET'])
+def list_users():
+    """Endpoint to view all registered users and their logins."""
+    users = User.query.order_by(User.last_login.desc()).all()
+    return jsonify([{
+        "id": u.id,
+        "name": u.name,
+        "email": u.email,
+        "picture": u.picture,
+        "created_at": u.created_at.strftime("%Y-%m-%d %H:%M:%S") if u.created_at else None,
+        "last_login": u.last_login.strftime("%Y-%m-%d %H:%M:%S") if u.last_login else None
+    } for u in users])
+
+# ==========================================
+# PREDICTION & VISION ROUTES
+# ==========================================
 @app.route('/predict_landmarks', methods=['POST'])
 def predict_landmarks():
     """High-speed coordinate prediction route."""

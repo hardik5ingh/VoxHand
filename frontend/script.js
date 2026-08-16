@@ -1,6 +1,7 @@
 // const API_BASE = "http://127.0.0.1:5000"; 
 const API_BASE = "https://voxhand-backend.onrender.com";
 let GOOGLE_CLIENT_ID = "";
+
 const video = document.getElementById("webcam");
 const canvas = document.getElementById("hiddenCanvas");
 const ctx = canvas.getContext("2d");
@@ -17,6 +18,72 @@ let lastWord = "";
 let currentSuggestionsCache = "";
 let selectedDeviceId = "";
 let toastTimer = null;
+let googleBtnRendered = false;
+
+// ==========================================
+// PAUSABLE GUEST TRIAL TIMER (2 MINUTES)
+// ==========================================
+const TRIAL_DURATION_MS = 2 * 60 * 1000; // 2 minutes total trial
+let trialTimer = null;
+let trialStartTime = 0;
+let remainingTrialMs = TRIAL_DURATION_MS;
+let isTimerPaused = false;
+
+function hasUsedTrial() {
+  return localStorage.getItem("voxhand_guest_trial_used") === "true";
+}
+
+function markTrialUsed() {
+  localStorage.setItem("voxhand_guest_trial_used", "true");
+}
+
+function startTrialCountdown() {
+  if (trialTimer) clearTimeout(trialTimer);
+  if (hasUsedTrial() || isUserLoggedIn()) return;
+
+  trialStartTime = Date.now();
+  isTimerPaused = false;
+
+  trialTimer = setTimeout(() => {
+    if (!isUserLoggedIn() && isCameraRunning) {
+      markTrialUsed();
+      stopCamera();
+      openTrialModal();
+    }
+  }, remainingTrialMs);
+}
+
+function pauseTrialCountdown() {
+  if (!trialTimer || isTimerPaused || isUserLoggedIn() || !isCameraRunning) return;
+
+  clearTimeout(trialTimer);
+  trialTimer = null;
+
+  // Calculate and preserve remaining trial time
+  const elapsed = Date.now() - trialStartTime;
+  remainingTrialMs = Math.max(0, remainingTrialMs - elapsed);
+  isTimerPaused = true;
+}
+
+function resumeTrialCountdown() {
+  if (!isTimerPaused || isUserLoggedIn() || !isCameraRunning) return;
+
+  if (remainingTrialMs <= 0) {
+    markTrialUsed();
+    stopCamera();
+    openTrialModal();
+    return;
+  }
+
+  startTrialCountdown();
+}
+
+function resetTrialState() {
+  if (trialTimer) clearTimeout(trialTimer);
+  trialTimer = null;
+  remainingTrialMs = TRIAL_DURATION_MS;
+  isTimerPaused = false;
+}
 
 // ==========================================
 // CLIENT-SIDE AUDIO FEEDBACK (WEB AUDIO API)
@@ -92,12 +159,16 @@ function promptLoginRequired() {
     setTimeout(() => {
       profileContainer.classList.remove("auth-attention-pulse");
     }, 1600);
+
+    if (!googleBtnRendered) {
+      waitForGoogleSdkAndRender();
+    }
   }
 
   const promptText = document.getElementById("menuPromptText");
   if (promptText) {
     const originalText = promptText.innerText;
-    promptText.innerText = "⚠️ Please sign in with Google to start the camera";
+    promptText.innerText = "⚠️ Please sign in with Google to continue";
     promptText.style.color = "#f59e0b";
     setTimeout(() => {
       promptText.innerText = originalText;
@@ -115,7 +186,6 @@ async function initAuthSystem() {
 
   displayLoggedOutState();
 
-  // 1. Fetch Client ID if not present
   if (!GOOGLE_CLIENT_ID) {
     try {
       const res = await fetch(`${API_BASE}/api/config`);
@@ -123,33 +193,14 @@ async function initAuthSystem() {
         const config = await res.json();
         if (config.google_client_id) {
           GOOGLE_CLIENT_ID = config.google_client_id;
+          waitForGoogleSdkAndRender();
         }
       }
     } catch (err) {
       console.warn("Could not fetch Google Client ID from backend:", err);
     }
-  }
-
-  // 2. Poll for Google SDK and render immediately on first load
-  if (GOOGLE_CLIENT_ID) {
-    waitForGoogleSdkAndRender();
   } else {
-    // Retry fetching config if backend is spinning up
-    const retryInterval = setInterval(async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/config`);
-        if (res.ok) {
-          const config = await res.json();
-          if (config.google_client_id) {
-            GOOGLE_CLIENT_ID = config.google_client_id;
-            clearInterval(retryInterval);
-            waitForGoogleSdkAndRender();
-          }
-        }
-      } catch (e) {
-        // Keep retrying until server responds
-      }
-    }, 1000);
+    waitForGoogleSdkAndRender();
   }
 }
 
@@ -158,33 +209,54 @@ function waitForGoogleSdkAndRender() {
     if (window.google && window.google.accounts && window.google.accounts.id && GOOGLE_CLIENT_ID) {
       renderGoogleButton();
     } else {
-      setTimeout(checkSdk, 100);
+      setTimeout(checkSdk, 60);
     }
   };
   checkSdk();
 }
 
 function renderGoogleButton() {
-  const btnWrapper = document.getElementById("googleBtnWrapper");
-  if (!btnWrapper || !GOOGLE_CLIENT_ID) return;
+  if (!GOOGLE_CLIENT_ID) return;
 
-  btnWrapper.innerHTML = "";
   google.accounts.id.initialize({
     client_id: GOOGLE_CLIENT_ID,
     callback: handleCredentialResponse,
     auto_select: false
   });
 
-  google.accounts.id.renderButton(
-    btnWrapper,
-    {
-      theme: "filled_black",
-      size: "medium",
-      type: "standard",
-      shape: "pill",
-      text: "signin_with"
-    }
-  );
+  // 1. Render in Header Dropdown
+  const btnWrapper = document.getElementById("googleBtnWrapper");
+  if (btnWrapper) {
+    btnWrapper.innerHTML = "";
+    google.accounts.id.renderButton(
+      btnWrapper,
+      {
+        theme: "filled_black",
+        size: "medium",
+        type: "standard",
+        shape: "pill",
+        text: "signin_with"
+      }
+    );
+  }
+
+  // 2. Render in Preview Expired Modal
+  const modalWrapper = document.getElementById("modalGoogleBtnWrapper");
+  if (modalWrapper) {
+    modalWrapper.innerHTML = "";
+    google.accounts.id.renderButton(
+      modalWrapper,
+      {
+        theme: "filled_black",
+        size: "large",
+        type: "standard",
+        shape: "pill",
+        text: "signin_with"
+      }
+    );
+  }
+
+  googleBtnRendered = true;
 }
 
 function decodeJwt(token) {
@@ -216,9 +288,12 @@ async function handleCredentialResponse(response) {
     console.warn("Backend auth verification warning:", err);
   }
 
+  localStorage.removeItem("voxhand_guest_trial_used");
   localStorage.setItem("voxhand_user", JSON.stringify(userData));
   displayUserProfile(userData);
-  
+  closeTrialModal();
+  resetTrialState();
+
   const profileContainer = document.getElementById("userProfile");
   if (profileContainer) profileContainer.classList.remove("open");
   
@@ -279,7 +354,12 @@ function toggleProfileMenu(event) {
   if (event) event.stopPropagation();
   const profileContainer = document.getElementById("userProfile");
   if (profileContainer) {
+    const willOpen = !profileContainer.classList.contains("open");
     profileContainer.classList.toggle("open");
+
+    if (willOpen && !isUserLoggedIn() && !googleBtnRendered) {
+      waitForGoogleSdkAndRender();
+    }
   }
 }
 
@@ -300,6 +380,8 @@ function handleSignOut(event) {
     stopCamera();
   }
 
+  resetTrialState();
+  googleBtnRendered = false;
   displayLoggedOutState();
   renderGoogleButton();
 }
@@ -328,21 +410,44 @@ function setServerStatus(online) {
 }
 
 // ==========================================
-// GESTURE GUIDE MODAL CONTROLS
+// GESTURE GUIDE & TRIAL MODAL CONTROLS
 // ==========================================
 function openGuideModal() {
   const modal = document.getElementById("guideModal");
   if (modal) modal.classList.add("active");
+  // Stop countdown while reviewing chart
+  pauseTrialCountdown();
 }
 
 function closeGuideModal() {
   const modal = document.getElementById("guideModal");
   if (modal) modal.classList.remove("active");
+  // Resume countdown when returning to camera
+  resumeTrialCountdown();
 }
 
 function closeGuideModalOnOutsideClick(event) {
   if (event.target.id === "guideModal") {
     closeGuideModal();
+  }
+}
+
+function openTrialModal() {
+  const modal = document.getElementById("trialExpiredModal");
+  if (modal) modal.classList.add("active");
+  if (!googleBtnRendered) {
+    waitForGoogleSdkAndRender();
+  }
+}
+
+function closeTrialModal() {
+  const modal = document.getElementById("trialExpiredModal");
+  if (modal) modal.classList.remove("active");
+}
+
+function closeTrialModalOnOutsideClick(event) {
+  if (event.target.id === "trialExpiredModal") {
+    closeTrialModal();
   }
 }
 
@@ -368,6 +473,7 @@ function switchGuideTab(tabName) {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeGuideModal();
+    closeTrialModal();
   }
 });
 
@@ -417,7 +523,7 @@ navigator.mediaDevices.addEventListener("devicechange", () => {
 });
 
 // ==========================================
-// CAMERA CONTROLS & AUTH GUARD
+// CAMERA CONTROLS & TRIAL TRIGGER
 // ==========================================
 async function toggleCamera() {
   initAudio();
@@ -427,13 +533,21 @@ async function toggleCamera() {
     return;
   }
 
-  // Auth Guard
-  if (!isUserLoggedIn()) {
-    promptLoginRequired();
+  // 1. If user is logged in, start camera normally
+  if (isUserLoggedIn()) {
+    await startCamera();
     return;
   }
 
+  // 2. If guest has already used their trial session, block and show login popup
+  if (hasUsedTrial()) {
+    openTrialModal();
+    return;
+  }
+
+  // 3. First-time guest usage: start camera and begin trial countdown
   await startCamera();
+  startTrialCountdown();
 }
 
 async function startCamera() {
@@ -477,6 +591,9 @@ function stopCamera() {
   }
   isCameraRunning = false;
   video.srcObject = null;
+
+  // Pause the timer while camera is off
+  pauseTrialCountdown();
 
   placeholder.style.display = "flex";
   toggleCamBtn.className = "toggle-cam-btn turn-on";
@@ -524,6 +641,7 @@ async function sendFrame() {
 
   loopTimeout = setTimeout(sendFrame, 80);
 }
+
 function updateUI(data) {
   if (data.action === "confirm") {
     playFeedbackSound("confirm");

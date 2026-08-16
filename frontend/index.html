@@ -44,13 +44,14 @@
     }
   }
   </script>
-<meta name="google-site-verification" content="iAdNSWB7bWK9_aIRIL0feAx8xCNKZLTjgnMPJ-gwZf4" />
+  <meta name="google-site-verification" content="iAdNSWB7bWK9_aIRIL0feAx8xCNKZLTjgnMPJ-gwZf4" />
+  
   <!-- Favicon & Stylesheet -->
   <link rel="shortcut icon" href="images/logo.svg" type="image/x-icon" />
   <link rel="stylesheet" href="style.css" />
 
   <!-- Google Identity Services SDK -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://accounts.google.com/gsi/client" async></script>
 </head>
 <body>
 
@@ -69,7 +70,7 @@
 
       <!-- Right Header Actions -->
       <div class="header-actions">
-        <!-- Toast Notification (Floats to the left of the Avatar) -->
+        <!-- Toast Notification -->
         <div id="authPromptToast" class="auth-prompt-toast">
           <span>Sign in</span>
         </div>
@@ -195,9 +196,7 @@
       </section>
     </div>
 
-    <!-- ==========================================
-         FOOTER SECTION
-         ========================================== -->
+    <!-- Footer -->
     <footer class="app-footer">
       <div class="footer-left">
         <p class="copyright-text">
@@ -241,9 +240,7 @@
     </footer>
   </div>
 
-  <!-- ==========================================
-       GESTURE GUIDE MODAL POPUP
-       ========================================== -->
+  <!-- Gesture Guide Modal -->
   <div id="guideModal" class="guide-modal-overlay" onclick="closeGuideModalOnOutsideClick(event)">
     <div class="guide-modal-content">
       <div class="guide-modal-header">
@@ -254,21 +251,17 @@
         <button class="guide-close-btn" onclick="closeGuideModal()" title="Close">&times;</button>
       </div>
 
-      <!-- Tab Navigation -->
       <div class="guide-tab-bar">
         <button id="tabAlphabets" class="guide-tab-btn active" onclick="switchGuideTab('alphabets')">🔤 Alphabets (A–Z)</button>
         <button id="tabNumbers" class="guide-tab-btn" onclick="switchGuideTab('numbers')">🔢 Numbers (0–10)</button>
         <button id="tabSpecial" class="guide-tab-btn" onclick="switchGuideTab('special')">⚡ Special Controls</button>
       </div>
 
-      <!-- Tab Panels -->
       <div class="guide-image-container">
-        <!-- 1. Alphabets Panel -->
         <div id="guideAlphabets" class="guide-tab-panel active">
           <img src="images/signLanguageGestures(A-Z).jpg" alt="Alphabet Sign Language Chart (A to Z)" class="guide-image" />
         </div>
 
-        <!-- 2. Numbers Panel -->
         <div id="guideNumbers" class="guide-tab-panel">
           <div class="placeholder-guide-box">
             <span class="placeholder-guide-icon">🔢</span>
@@ -282,7 +275,6 @@
           </div>
         </div>
 
-        <!-- 3. Special / Controls Panel -->
         <div id="guideSpecial" class="guide-tab-panel">
           <div class="special-legend">
             <div class="legend-card">
@@ -303,6 +295,19 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Guest Preview Finished Modal -->
+  <div id="trialExpiredModal" class="guide-modal-overlay" onclick="closeTrialModalOnOutsideClick(event)">
+    <div class="guide-modal-content trial-modal-box">
+      <button class="modal-close-cross-btn" onclick="closeTrialModal()" title="Close">&times;</button>
+      <div class="trial-icon"> 
+        <img src="images/logo.svg" alt=""> 
+      </div>
+      <h2>Continue Translating with VoxHand</h2>
+      <p>Sign in with Google to continue using the real-time ASL translator, unlock unlimited sessions, and enable full voice readout.</p>
+      <div id="modalGoogleBtnWrapper" class="modal-login-btn-container"></div>
     </div>
   </div>
 
