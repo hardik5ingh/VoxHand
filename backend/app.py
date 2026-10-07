@@ -51,7 +51,13 @@ def get_word_suggestions(prefix, top_k=4):
 # FLASK & DATABASE INITIALIZATION
 # ==========================================
 app = Flask(__name__)
-CORS(app)
+CORS(
+    app,
+    resources={r"/*": {"origins": "*"}},
+    supports_credentials=True,
+    allow_headers=["Content-Type", "Authorization", "Access-Control-Allow-Origin"],
+    methods=["GET", "POST", "OPTIONS"]
+)
 
 # Database Connection (Uses Render PostgreSQL or local SQLite fallback)
 database_url = os.getenv("DATABASE_URL", "sqlite:///users.db")
