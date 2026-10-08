@@ -554,6 +554,7 @@ async function startCamera() {
   try {
     const constraints = {
       video: {
+        facingMode: selectedDeviceId ? undefined : "user",
         deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
         width: { ideal: 640 },
         height: { ideal: 480 }
@@ -614,8 +615,20 @@ async function sendFrame() {
   if (!isProcessingFrame && video.readyState === video.HAVE_ENOUGH_DATA) {
     isProcessingFrame = true;
 
-    canvas.width = 320;
-    canvas.height = 240;
+    const vWidth = video.videoWidth || 640;
+    const vHeight = video.videoHeight || 480;
+    const aspect = vWidth / vHeight;
+
+    if (aspect < 1) {
+      // Portrait (Mobile)
+      canvas.width = 240;
+      canvas.height = Math.round(240 / aspect);
+    } else {
+      // Landscape (Desktop)
+      canvas.width = 320;
+      canvas.height = Math.round(320 / aspect);
+    }
+
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     const base64Image = canvas.toDataURL("image/jpeg", 0.4);
@@ -639,7 +652,8 @@ async function sendFrame() {
     }
   }
 
-  loopTimeout = setTimeout(sendFrame, 80);
+  // 120ms (~8 FPS) is stable for mobile cellular connections and desktop alike
+  loopTimeout = setTimeout(sendFrame, 120);
 }
 
 function updateUI(data) {
