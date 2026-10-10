@@ -28,7 +28,7 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 CONFIG = {
     "MODEL_PATH": os.path.join(os.path.dirname(__file__), "models", "hand_landmarker.task"),
     "GESTURE_MODEL_PATH": os.path.join(os.path.dirname(__file__), "models", "gesture_model.pkl"),
-    "CONFIRMATION_FRAMES": 1,      # Instant confirmation for 120ms network packets
+    "CONFIRMATION_FRAMES": 2,      # Instant confirmation for 120ms network packets
     "CONFIDENCE_THRESHOLD": 0.30,  # Forgiving probability threshold for mobile camera angles
 }
 
