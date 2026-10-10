@@ -2,6 +2,13 @@
 const API_BASE = "https://voxhand-backend.onrender.com";
 let GOOGLE_CLIENT_ID = "";
 
+// Generate or retrieve unique device session ID so different browsers do not share sentences
+let sessionId = sessionStorage.getItem("voxhand_session_id");
+if (!sessionId) {
+  sessionId = "sess_" + Math.random().toString(36).substring(2, 9) + "_" + Date.now();
+  sessionStorage.setItem("voxhand_session_id", sessionId);
+}
+
 const video = document.getElementById("webcam");
 const canvas = document.getElementById("hiddenCanvas");
 const ctx = canvas.getContext("2d");
@@ -23,7 +30,7 @@ let googleBtnRendered = false;
 // ==========================================
 // PAUSABLE GUEST TRIAL TIMER (2 MINUTES)
 // ==========================================
-const TRIAL_DURATION_MS = 2 * 60 * 1000; // 2 minutes total trial
+const TRIAL_DURATION_MS = 2 * 60 * 1000;
 let trialTimer = null;
 let trialStartTime = 0;
 let remainingTrialMs = TRIAL_DURATION_MS;
@@ -59,7 +66,6 @@ function pauseTrialCountdown() {
   clearTimeout(trialTimer);
   trialTimer = null;
 
-  // Calculate and preserve remaining trial time
   const elapsed = Date.now() - trialStartTime;
   remainingTrialMs = Math.max(0, remainingTrialMs - elapsed);
   isTimerPaused = true;
@@ -224,7 +230,6 @@ function renderGoogleButton() {
     auto_select: false
   });
 
-  // 1. Render in Header Dropdown
   const btnWrapper = document.getElementById("googleBtnWrapper");
   if (btnWrapper) {
     btnWrapper.innerHTML = "";
@@ -240,7 +245,6 @@ function renderGoogleButton() {
     );
   }
 
-  // 2. Render in Preview Expired Modal
   const modalWrapper = document.getElementById("modalGoogleBtnWrapper");
   if (modalWrapper) {
     modalWrapper.innerHTML = "";
@@ -415,14 +419,12 @@ function setServerStatus(online) {
 function openGuideModal() {
   const modal = document.getElementById("guideModal");
   if (modal) modal.classList.add("active");
-  // Stop countdown while reviewing chart
   pauseTrialCountdown();
 }
 
 function closeGuideModal() {
   const modal = document.getElementById("guideModal");
   if (modal) modal.classList.remove("active");
-  // Resume countdown when returning to camera
   resumeTrialCountdown();
 }
 
@@ -533,19 +535,16 @@ async function toggleCamera() {
     return;
   }
 
-  // 1. If user is logged in, start camera normally
   if (isUserLoggedIn()) {
     await startCamera();
     return;
   }
 
-  // 2. If guest has already used their trial session, block and show login popup
   if (hasUsedTrial()) {
     openTrialModal();
     return;
   }
 
-  // 3. First-time guest usage: start camera and begin trial countdown
   await startCamera();
   startTrialCountdown();
 }
@@ -593,7 +592,6 @@ function stopCamera() {
   isCameraRunning = false;
   video.srcObject = null;
 
-  // Pause the timer while camera is off
   pauseTrialCountdown();
 
   placeholder.style.display = "flex";
@@ -620,11 +618,9 @@ async function sendFrame() {
     const aspect = vWidth / vHeight;
 
     if (aspect < 1) {
-      // Portrait (Mobile)
       canvas.width = 240;
       canvas.height = Math.round(240 / aspect);
     } else {
-      // Landscape (Desktop)
       canvas.width = 320;
       canvas.height = Math.round(320 / aspect);
     }
@@ -637,7 +633,10 @@ async function sendFrame() {
       const response = await fetch(`${API_BASE}/process_frame`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: base64Image })
+        body: JSON.stringify({ 
+          image: base64Image,
+          session_id: sessionId 
+        })
       });
 
       if (response.ok) {
@@ -652,7 +651,6 @@ async function sendFrame() {
     }
   }
 
-  // 120ms (~8 FPS) is stable for mobile cellular connections and desktop alike
   loopTimeout = setTimeout(sendFrame, 120);
 }
 
@@ -697,7 +695,10 @@ async function setMode(modeKey) {
     await fetch(`${API_BASE}/set_mode`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: modeKey })
+      body: JSON.stringify({ 
+        mode: modeKey,
+        session_id: sessionId 
+      })
     });
     document.querySelectorAll(".mode-btn").forEach((btn, index) => {
       const modeKeys = ['1', '2', '0'];
@@ -714,7 +715,10 @@ async function chooseWord(word) {
     await fetch(`${API_BASE}/autocomplete`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ word: word })
+      body: JSON.stringify({ 
+        word: word,
+        session_id: sessionId 
+      })
     });
   } catch (err) {
     console.error("Autocomplete error:", err);
@@ -723,7 +727,11 @@ async function chooseWord(word) {
 
 async function clearText() {
   try {
-    await fetch(`${API_BASE}/clear`, { method: "POST" });
+    await fetch(`${API_BASE}/clear`, { 
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId })
+    });
     document.getElementById("sentenceText").innerText = "";
     document.getElementById("currentWord").innerText = "";
     currentSuggestionsCache = "";

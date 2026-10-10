@@ -19,7 +19,6 @@ from mediapipe.tasks.python import vision
 import numpy as np
 from wordfreq import top_n_list
 
-# Load environment variables
 load_dotenv()
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 
@@ -29,8 +28,8 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 CONFIG = {
     "MODEL_PATH": os.path.join(os.path.dirname(__file__), "models", "hand_landmarker.task"),
     "GESTURE_MODEL_PATH": os.path.join(os.path.dirname(__file__), "models", "gesture_model.pkl"),
-    "CONFIRMATION_FRAMES": 2,      # Tuned for fast, responsive typing
-    "CONFIDENCE_THRESHOLD": 0.35,  # Low-latency probability threshold
+    "CONFIRMATION_FRAMES": 1,      # Instant confirmation for 120ms network packets
+    "CONFIDENCE_THRESHOLD": 0.30,  # Forgiving probability threshold for mobile camera angles
 }
 
 DICTIONARY = [w.upper() for w in top_n_list('en', 25000) if w.isalpha()]
@@ -58,7 +57,6 @@ CORS(
     methods=["GET", "POST", "OPTIONS"]
 )
 
-# In-memory storage for active users (No external database connection required)
 active_users = {}
 
 # ==========================================
@@ -95,23 +93,26 @@ MODES = {
 }
 
 # ==========================================
-# STATE & BUFFERS
+# PER-SESSION STATE STORAGE
 # ==========================================
 state_lock = threading.Lock()
+sessions = {}
 
-last_appended_gesture = None
-current_candidate = None
-candidate_counter = 0
-
-current_state = {
-    "detected_gesture": "None",
-    "confidence": 0.0,
-    "current_word": "",
-    "sentence": "",
-    "suggestions": [],
-    "mode": "1",
-    "hand_detected": False
-}
+def get_session(session_id):
+    if session_id not in sessions:
+        sessions[session_id] = {
+            "detected_gesture": "None",
+            "confidence": 0.0,
+            "current_word": "",
+            "sentence": "",
+            "suggestions": [],
+            "mode": "1",
+            "hand_detected": False,
+            "last_appended_gesture": None,
+            "current_candidate": None,
+            "candidate_counter": 0
+        }
+    return sessions[session_id]
 
 # ==========================================
 # 74-FEATURE EXTRACTION PIPELINE
@@ -191,7 +192,6 @@ def google_auth():
 
 @app.route('/api/users', methods=['GET'])
 def list_users():
-    """Endpoint to view all active registered users in current session."""
     return jsonify(list(active_users.values()))
 
 # ==========================================
@@ -199,23 +199,22 @@ def list_users():
 # ==========================================
 @app.route('/predict_landmarks', methods=['POST'])
 def predict_landmarks():
-    """High-speed coordinate prediction route."""
-    global last_appended_gesture, current_candidate, candidate_counter
-    
     data = request.get_json() or {}
+    session_id = data.get('session_id', 'default_session')
     landmarks_data = data.get('landmarks')
     img_w = data.get('width', 640)
     img_h = data.get('height', 480)
 
-    if not landmarks_data:
-        with state_lock:
-            last_appended_gesture = None
-            current_candidate = None
-            candidate_counter = 0
-            current_state["detected_gesture"] = "None"
-            current_state["confidence"] = 0.0
-            current_state["hand_detected"] = False
-        return jsonify(current_state)
+    with state_lock:
+        state = get_session(session_id)
+        if not landmarks_data:
+            state["last_appended_gesture"] = None
+            state["current_candidate"] = None
+            state["candidate_counter"] = 0
+            state["detected_gesture"] = "None"
+            state["confidence"] = 0.0
+            state["hand_detected"] = False
+            return jsonify(state)
 
     class DummyLandmark:
         def __init__(self, pt):
@@ -231,7 +230,8 @@ def predict_landmarks():
     action_triggered = "none"
 
     with state_lock:
-        mode_name, allowed_classes = MODES.get(current_state["mode"], MODES['1'])
+        state = get_session(session_id)
+        mode_name, allowed_classes = MODES.get(state["mode"], MODES['1'])
         probabilities = clf.predict_proba(features)[0]
         valid_indices = [i for i, c in enumerate(clf.classes_) if c in allowed_classes]
 
@@ -243,75 +243,75 @@ def predict_landmarks():
             detected_pred = str(filtered_classes[np.argmax(filtered_probs)]).lower()
 
             if max_prob >= CONFIG["CONFIDENCE_THRESHOLD"]:
-                if detected_pred == current_candidate:
-                    candidate_counter += 1
+                if detected_pred == state["current_candidate"]:
+                    state["candidate_counter"] += 1
                 else:
-                    current_candidate = detected_pred
-                    candidate_counter = 1
+                    state["current_candidate"] = detected_pred
+                    state["candidate_counter"] = 1
 
-                if candidate_counter >= CONFIG["CONFIRMATION_FRAMES"]:
-                    if detected_pred != last_appended_gesture:
-                        last_appended_gesture = detected_pred
+                if state["candidate_counter"] >= CONFIG["CONFIRMATION_FRAMES"]:
+                    if detected_pred != state["last_appended_gesture"]:
+                        state["last_appended_gesture"] = detected_pred
 
                         if detected_pred == 'del':
                             action_triggered = "delete"
-                            if len(current_state["current_word"]) > 0:
-                                if current_state["current_word"].endswith('10'):
-                                    current_state["current_word"] = current_state["current_word"][:-2]
+                            if len(state["current_word"]) > 0:
+                                if state["current_word"].endswith('10'):
+                                    state["current_word"] = state["current_word"][:-2]
                                 else:
-                                    current_state["current_word"] = current_state["current_word"][:-1]
-                            elif len(current_state["sentence"]) > 0:
-                                current_state["sentence"] = current_state["sentence"][:-1]
+                                    state["current_word"] = state["current_word"][:-1]
+                            elif len(state["sentence"]) > 0:
+                                state["sentence"] = state["sentence"][:-1]
 
                         elif detected_pred == 'space':
                             action_triggered = "confirm"
-                            if current_state["current_word"]:
-                                current_state["sentence"] += current_state["current_word"] + " "
-                                current_state["current_word"] = ""
+                            if state["current_word"]:
+                                state["sentence"] += state["current_word"] + " "
+                                state["current_word"] = ""
 
                         elif detected_pred == '.':
                             action_triggered = "speak"
-                            if current_state["current_word"]:
-                                current_state["sentence"] += current_state["current_word"] + ". "
-                                current_state["current_word"] = ""
-                            elif current_state["sentence"] and not current_state["sentence"].endswith('. '):
-                                current_state["sentence"] = current_state["sentence"].strip() + ". "
+                            if state["current_word"]:
+                                state["sentence"] += state["current_word"] + ". "
+                                state["current_word"] = ""
+                            elif state["sentence"] and not state["sentence"].endswith('. '):
+                                state["sentence"] = state["sentence"].strip() + ". "
 
                         elif detected_pred in numbers_set:
                             action_triggered = "confirm"
-                            current_state["current_word"] += detected_pred.upper()
+                            state["current_word"] += detected_pred.upper()
 
                         else:
                             action_triggered = "confirm"
-                            current_state["current_word"] += detected_pred.upper()
+                            state["current_word"] += detected_pred.upper()
 
-                        current_state["suggestions"] = get_word_suggestions(current_state["current_word"])
+                        state["suggestions"] = get_word_suggestions(state["current_word"])
             else:
-                candidate_counter = 0
+                state["candidate_counter"] = 0
+                state["last_appended_gesture"] = None
 
-        current_state["detected_gesture"] = detected_pred.upper()
-        current_state["confidence"] = round(max_prob * 100, 1)
-        current_state["hand_detected"] = True
+        state["detected_gesture"] = detected_pred.upper()
+        state["confidence"] = round(max_prob * 100, 1)
+        state["hand_detected"] = True
 
         return jsonify({
-            "gesture": current_state["detected_gesture"],
-            "confidence": current_state["confidence"],
-            "current_word": current_state["current_word"],
-            "sentence": current_state["sentence"],
-            "suggestions": current_state["suggestions"],
-            "mode_key": current_state["mode"],
+            "gesture": state["detected_gesture"],
+            "confidence": state["confidence"],
+            "current_word": state["current_word"],
+            "sentence": state["sentence"],
+            "suggestions": state["suggestions"],
+            "mode_key": state["mode"],
             "hand_detected": True,
             "action": action_triggered
         })
 
 @app.route('/process_frame', methods=['POST'])
 def process_frame():
-    """Fallback Base64 frame processing route."""
-    global last_appended_gesture, current_candidate, candidate_counter
-
     data = request.get_json()
     if not data or 'image' not in data:
         return jsonify({'error': 'No image data'}), 400
+
+    session_id = data.get('session_id', 'default_session')
 
     try:
         image_data = data['image'].split(',')[1] if ',' in data['image'] else data['image']
@@ -322,7 +322,6 @@ def process_frame():
         if frame is None:
             return jsonify({'error': 'Failed to decode image'}), 400
 
-        frame = cv2.flip(frame, 1)
         h, w, _ = frame.shape
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
@@ -335,7 +334,8 @@ def process_frame():
         action_triggered = "none"
 
         with state_lock:
-            mode_name, allowed_classes = MODES.get(current_state["mode"], MODES['1'])
+            state = get_session(session_id)
+            mode_name, allowed_classes = MODES.get(state["mode"], MODES['1'])
 
             if hand_detected:
                 landmarks = result.hand_landmarks[0]
@@ -352,68 +352,69 @@ def process_frame():
                     detected_pred = str(filtered_classes[np.argmax(filtered_probs)]).lower()
 
                     if max_prob >= CONFIG["CONFIDENCE_THRESHOLD"]:
-                        if detected_pred == current_candidate:
-                            candidate_counter += 1
+                        if detected_pred == state["current_candidate"]:
+                            state["candidate_counter"] += 1
                         else:
-                            current_candidate = detected_pred
-                            candidate_counter = 1
+                            state["current_candidate"] = detected_pred
+                            state["candidate_counter"] = 1
 
-                        if candidate_counter >= CONFIG["CONFIRMATION_FRAMES"]:
-                            if detected_pred != last_appended_gesture:
-                                last_appended_gesture = detected_pred
+                        if state["candidate_counter"] >= CONFIG["CONFIRMATION_FRAMES"]:
+                            if detected_pred != state["last_appended_gesture"]:
+                                state["last_appended_gesture"] = detected_pred
 
                                 if detected_pred == 'del':
                                     action_triggered = "delete"
-                                    if len(current_state["current_word"]) > 0:
-                                        if current_state["current_word"].endswith('10'):
-                                            current_state["current_word"] = current_state["current_word"][:-2]
+                                    if len(state["current_word"]) > 0:
+                                        if state["current_word"].endswith('10'):
+                                            state["current_word"] = state["current_word"][:-2]
                                         else:
-                                            current_state["current_word"] = current_state["current_word"][:-1]
-                                    elif len(current_state["sentence"]) > 0:
-                                        current_state["sentence"] = current_state["sentence"][:-1]
+                                            state["current_word"] = state["current_word"][:-1]
+                                    elif len(state["sentence"]) > 0:
+                                        state["sentence"] = state["sentence"][:-1]
 
                                 elif detected_pred == 'space':
                                     action_triggered = "confirm"
-                                    if current_state["current_word"]:
-                                        current_state["sentence"] += current_state["current_word"] + " "
-                                        current_state["current_word"] = ""
+                                    if state["current_word"]:
+                                        state["sentence"] += state["current_word"] + " "
+                                        state["current_word"] = ""
 
                                 elif detected_pred == '.':
                                     action_triggered = "speak"
-                                    if current_state["current_word"]:
-                                        current_state["sentence"] += current_state["current_word"] + ". "
-                                        current_state["current_word"] = ""
-                                    elif current_state["sentence"] and not current_state["sentence"].endswith('. '):
-                                        current_state["sentence"] = current_state["sentence"].strip() + ". "
+                                    if state["current_word"]:
+                                        state["sentence"] += state["current_word"] + ". "
+                                        state["current_word"] = ""
+                                    elif state["sentence"] and not state["sentence"].endswith('. '):
+                                        state["sentence"] = state["sentence"].strip() + ". "
 
                                 elif detected_pred in numbers_set:
                                     action_triggered = "confirm"
-                                    current_state["current_word"] += detected_pred.upper()
+                                    state["current_word"] += detected_pred.upper()
 
                                 else:
                                     action_triggered = "confirm"
-                                    current_state["current_word"] += detected_pred.upper()
+                                    state["current_word"] += detected_pred.upper()
 
-                                current_state["suggestions"] = get_word_suggestions(current_state["current_word"])
+                                state["suggestions"] = get_word_suggestions(state["current_word"])
                     else:
-                        candidate_counter = 0
+                        state["candidate_counter"] = 0
+                        state["last_appended_gesture"] = None
             else:
-                last_appended_gesture = None
-                current_candidate = None
-                candidate_counter = 0
+                state["last_appended_gesture"] = None
+                state["current_candidate"] = None
+                state["candidate_counter"] = 0
 
-            current_state["detected_gesture"] = detected_pred.upper()
-            current_state["confidence"] = round(max_prob * 100, 1)
-            current_state["hand_detected"] = hand_detected
+            state["detected_gesture"] = detected_pred.upper()
+            state["confidence"] = round(max_prob * 100, 1)
+            state["hand_detected"] = hand_detected
 
             return jsonify({
-                "gesture": current_state["detected_gesture"],
-                "confidence": current_state["confidence"],
-                "current_word": current_state["current_word"],
-                "sentence": current_state["sentence"],
-                "suggestions": current_state["suggestions"],
-                "mode_key": current_state["mode"],
-                "hand_detected": current_state["hand_detected"],
+                "gesture": state["detected_gesture"],
+                "confidence": state["confidence"],
+                "current_word": state["current_word"],
+                "sentence": state["sentence"],
+                "suggestions": state["suggestions"],
+                "mode_key": state["mode"],
+                "hand_detected": state["hand_detected"],
                 "action": action_triggered
             })
 
@@ -423,42 +424,48 @@ def process_frame():
 
 @app.route('/get_state', methods=['GET'])
 def get_state():
+    session_id = request.args.get('session_id', 'default_session')
     with state_lock:
-        return jsonify(current_state)
+        return jsonify(get_session(session_id))
 
 @app.route('/set_mode', methods=['POST'])
 def set_mode():
-    global current_candidate, candidate_counter, last_appended_gesture
     data = request.get_json() or {}
+    session_id = data.get('session_id', 'default_session')
     new_mode = str(data.get('mode', '1'))
     with state_lock:
-        current_state["mode"] = new_mode
-        current_candidate = None
-        candidate_counter = 0
-        last_appended_gesture = None
+        state = get_session(session_id)
+        state["mode"] = new_mode
+        state["current_candidate"] = None
+        state["candidate_counter"] = 0
+        state["last_appended_gesture"] = None
     return jsonify({"status": "success", "mode": new_mode})
 
 @app.route('/autocomplete', methods=['POST'])
 def autocomplete():
     data = request.get_json() or {}
+    session_id = data.get('session_id', 'default_session')
     selected_word = data.get('word', '')
-    if selected_word:
-        with state_lock:
-            current_state["sentence"] += selected_word.upper() + " "
-            current_state["current_word"] = ""
-            current_state["suggestions"] = []
-    return jsonify({"status": "success", "sentence": current_state["sentence"]})
+    with state_lock:
+        state = get_session(session_id)
+        if selected_word:
+            state["sentence"] += selected_word.upper() + " "
+            state["current_word"] = ""
+            state["suggestions"] = []
+    return jsonify({"status": "success", "sentence": state["sentence"]})
 
 @app.route('/clear', methods=['POST'])
 def clear():
-    global last_appended_gesture, current_candidate, candidate_counter
+    data = request.get_json() or {}
+    session_id = data.get('session_id', 'default_session')
     with state_lock:
-        current_state["sentence"] = ""
-        current_state["current_word"] = ""
-        current_state["suggestions"] = []
-        last_appended_gesture = None
-        current_candidate = None
-        candidate_counter = 0
+        state = get_session(session_id)
+        state["sentence"] = ""
+        state["current_word"] = ""
+        state["suggestions"] = []
+        state["last_appended_gesture"] = None
+        state["current_candidate"] = None
+        state["candidate_counter"] = 0
     return jsonify({"status": "success"})
 
 if __name__ == '__main__':
